@@ -257,7 +257,7 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 const getCurrentUser = asyncHandler(async (req, res) => {
   return res
     .status(200)
-    .json(200, req.user, "current user fetched successfully");
+    .json(new ApiResponse(200, req.user, "current user fetched successfully"));
 });
 
 const updateAccountDetails = asyncHandler(async (req, res) => {
@@ -267,7 +267,7 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     throw new ApiError(400, "All fields are required");
   }
 
-  const user = User.findByIdAndUpdate(
+  const user = await User.findByIdAndUpdate(
     req.user?._id,
     {
       $set: {
@@ -290,13 +290,25 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Avatar file is missing");
   }
 
+  // Retrieve the current user
+  const user = await User.findById(req.user?._id).select("avatar");
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  // Store the old avatar URL
+  const oldAvatarUrl = user.avatar;
+
+  // Upload the new avatar to Cloudinary
   const avatar = await uploadOnCloudinary(avatarLocalPath);
 
   if (!avatar.url) {
-    throw new ApiError(400, "Error while uploading on avatar");
+    throw new ApiError(400, "Error while uploading avatar");
   }
 
- const user =  await User.findByIdAndUpdate(
+  // Update the user's avatar URL in the database
+  const updatedUser = await User.findByIdAndUpdate(
     req.user?._id,
     {
       $set: {
@@ -306,10 +318,17 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
     { new: true }
   ).select("-password");
 
+  // Delete the old avatar from Cloudinary if it exists
+  if (oldAvatarUrl) {
+    const oldAvatarPublicId = oldAvatarUrl.split('/').pop().split('.')[0]; // Extract public_id from URL
+    await deleteFromCloudinary(oldAvatarPublicId);
+  }
+
   return res
     .status(200)
-    .json(new ApiResponse(200, user, "Avatar image updated successfully"));
+    .json(new ApiResponse(200, updatedUser, "Avatar image updated successfully"));
 });
+
 
 const updateUserCoverImage = asyncHandler(async (req, res) => {
   const coverImageLocalPath = req.file?.path;
